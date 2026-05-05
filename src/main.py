@@ -3,6 +3,7 @@
 import asyncio
 import logging
 
+from src.db.knowledge_cache import KnowledgeCache
 from src.config import settings
 from src.logging_config import setup_logging
 from src.ai_client import AIClient
@@ -42,16 +43,27 @@ async def main() -> None:
         password=settings.stepik_password,
     )
 
+    cache: KnowledgeCache | None = None
+    if settings.database_url:
+        cache = KnowledgeCache(settings.database_url)
+        await cache.init()
+    else:
+        logger.info("DATABASE_URL не задан. KnowledgeCache [off]")
+
     ai = AIClient()
     registry = create_default_registry()
 
-    async with StepikHTTPClient(auth) as http:
-        api = StepikAPIClient(http)
-        step_proc = StepProcessor(ai, api, registry)
-        course_proc = CourseProcessor(step_proc)
+    try:
+        async with StepikHTTPClient(auth) as http:
+            api = StepikAPIClient(http)
+            step_proc = StepProcessor(ai, api, registry, cache=cache)
+            course_proc = CourseProcessor(step_proc)
 
-        solved = await course_proc.process_course(course_id)
-        logger.info("🎓 Итого: %d шагов.", solved)
+            solved = await course_proc.process_course(course_id)
+            logger.info("🎓 Итого: %d шагов.", solved)
+    finally:
+        if cache:
+            await cache.close()
 
 
 if __name__ == "__main__":

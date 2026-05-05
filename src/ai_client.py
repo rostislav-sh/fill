@@ -49,6 +49,29 @@ except ImportError:
     GroqAuthenticationError = _GroqStub  # type: ignore
 
 
+try:
+    from anthropic import AsyncAnthropic
+    from anthropic import (
+        RateLimitError as AnthropicRateLimitError,
+        APIStatusError as AnthropicAPIStatusError,
+        APIConnectionError as AnthropicAPIConnectionError,
+        AuthenticationError as AnthropicAuthenticationError,
+    )
+
+    ANTHROPIC_AVAILABLE = True
+except ImportError:
+    ANTHROPIC_AVAILABLE = False
+    AsyncAnthropic = None  # type: ignore
+
+    class _AnthropicStub(Exception):
+        pass
+
+    AnthropicRateLimitError = _AnthropicStub  # type: ignore
+    AnthropicAPIStatusError = _AnthropicStub  # type: ignore
+    AnthropicAPIConnectionError = _AnthropicStub  # type: ignore
+    AnthropicAuthenticationError = _AnthropicStub  # type: ignore
+
+
 def _is_groq_transient(exc: BaseException) -> bool:
     """500/502/503/529 и обрывы соединения — стоит повторить."""
     if isinstance(exc, GroqAPIConnectionError):
@@ -68,6 +91,28 @@ if GROQ_AVAILABLE:
 else:
     def _retry_groq(fn):  # type: ignore
         """Возвращает функцию без ретраев, если SDK Groq недоступен."""
+        return fn
+
+
+def _is_anthropic_transient(exc: BaseException) -> bool:
+    """500/502/503/529 и обрывы соединения — стоит повторить."""
+    if isinstance(exc, AnthropicAPIConnectionError):
+        return True
+    if isinstance(exc, AnthropicAPIStatusError) and hasattr(exc, "status_code"):
+        return getattr(exc, "status_code", 0) in (500, 502, 503, 529)
+    return False
+
+
+if ANTHROPIC_AVAILABLE:
+    _retry_anthropic = retry(
+        retry=retry_if_exception(_is_anthropic_transient),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=15),
+        reraise=True,
+    )
+else:
+    def _retry_anthropic(fn):  # type: ignore
+        """Возвращает функцию без ретраев, если SDK Anthropic недоступен."""
         return fn
 
 
@@ -98,6 +143,37 @@ _GROQ_SYSTEM_MSG = (
     "Проходишь курс на stepik"
     "1) БФУ им.Канта .Курс «Философия» ссылка -https://stepik.org/course/6667/syllabus"
     "2) БФУ им.Канта .Курс «История философии» Ссылка -https://stepik.org/course/11811)"
+    "ВСЕГДА отвечай ТОЛЬКО валидным JSON строго по указанной схеме. "
+    "Никакого текста вне JSON."
+)
+
+_ANTHROPIC_SCHEMA_HINTS: dict[str, str] = {
+    "ChoiceResponse": (
+        "Требуемый JSON:\n"
+        '{"type":"choice","selected_indices":[0,2],"reasoning":"обоснование"}\n'
+        "selected_indices — список целых чисел: индексы правильных вариантов (с 0).\n"
+        "reasoning — краткое обоснование."
+    ),
+    "OrderingResponse": (
+        "Требуемый JSON:\n"
+        '{"type":"ordering","ordered_indices":[2,0,1],"reasoning":"обоснование"}\n'
+        "ordered_indices — перестановка индексов ПРАВОГО списка, "
+        "чтобы элементы встали напротив ЛЕВОГО.\n"
+        "reasoning — краткое обоснование."
+    ),
+    "StringResponse": (
+        "Требуемый JSON:\n"
+        '{"type":"string","answer":"текст ответа","reasoning":"обоснование"}\n'
+        "answer — точный текстовый ответ.\n"
+        "reasoning — краткое обоснование."
+    ),
+}
+
+_ANTHROPIC_SYSTEM_MSG = (
+    "Ты — эксперт по решению учебных заданий. "
+    "Проходишь курс на stepik. "
+    "1) БФУ им.Канта. Курс «Философия» ссылка - https://stepik.org/course/6667/syllabus "
+    "2) БФУ им.Канта. Курс «История философии» ссылка - https://stepik.org/course/11811 "
     "ВСЕГДА отвечай ТОЛЬКО валидным JSON строго по указанной схеме. "
     "Никакого текста вне JSON."
 )
@@ -163,6 +239,7 @@ class AIClient:
         ]
 
         self._init_groq()
+        self._init_anthropic()
 
     def _init_groq(self) -> None:
         """Инициализирует Groq-клиент и список моделей, если доступен ключ и SDK."""
@@ -185,6 +262,25 @@ class AIClient:
         self.groq_model_candidates = self._parse_model_candidates(raw_model)
         logger.info("Groq инициализирован: модели=%s", self.groq_model_candidates)
 
+    def _init_anthropic(self) -> None:
+        """Инициализирует Anthropic-клиент и список моделей, если доступен ключ и SDK."""
+        anthropic_key = getattr(settings, "anthropic_api_key", "").strip()
+
+        if not anthropic_key or not ANTHROPIC_AVAILABLE:
+            self.anthropic_client = None
+            self.anthropic_model_candidates: list[str] = []
+            if anthropic_key and not ANTHROPIC_AVAILABLE:
+                logger.warning(
+                    "ANTHROPIC_API_KEY задан, но пакет 'anthropic' не установлен. "
+                    "Выполните: pip install anthropic"
+                )
+            return
+
+        self.anthropic_client = AsyncAnthropic(api_key=anthropic_key)
+        raw_model = getattr(settings, "anthropic_model", "claude-sonnet-4-6")
+        self.anthropic_model_candidates = self._parse_model_candidates(raw_model)
+        logger.info("Anthropic инициализирован: модели=%s", self.anthropic_model_candidates)
+
     def _get_model_sequence(self) -> list[tuple[str, str]]:
         """Упорядоченный список ``(provider, model_name)``."""
         seq: list[tuple[str, str]] = []
@@ -198,10 +294,14 @@ class AIClient:
             for m in self.gemini_model_candidates:
                 seq.append(("gemini", m))
 
+        if prov in ("anthropic", "auto") and self.anthropic_client is not None:
+            for m in self.anthropic_model_candidates:
+                seq.append(("anthropic", m))
+
         if not seq:
             raise AIClientConfigError(
                 "Нет доступных AI-провайдеров. "
-                "Задайте GEMINI_API_KEY и/или GROQ_API_KEY."
+                "Задайте GEMINI_API_KEY, GROQ_API_KEY или ANTHROPIC_API_KEY."
             )
         return seq
 
@@ -370,6 +470,25 @@ class AIClient:
         return AIClientResponseError(f"Ошибка Groq: {exc}")
 
     @staticmethod
+    def _build_anthropic_error(exc: Exception) -> AIClientResponseError:
+        """Нормализует ошибки Anthropic в доменные исключения."""
+        if isinstance(exc, AnthropicAuthenticationError):
+            return AIClientConfigError("Неверный ANTHROPIC_API_KEY.")
+        if isinstance(exc, AnthropicRateLimitError):
+            msg = str(exc)
+            if "per day" in msg.lower() or "daily" in msg.lower():
+                return AIClientResponseError("Суточный лимит Anthropic исчерпан.")
+            return AIClientResponseError(
+                "Превышен лимит Anthropic API. Подождите или смените модель."
+            )
+        if isinstance(exc, AnthropicAPIConnectionError):
+            return AIClientResponseError(f"Ошибка соединения с Anthropic: {exc}")
+        if isinstance(exc, AnthropicAPIStatusError):
+            code = getattr(exc, "status_code", "?")
+            return AIClientResponseError(f"Anthropic вернул ошибку {code}: {exc}")
+        return AIClientResponseError(f"Ошибка Anthropic: {exc}")
+
+    @staticmethod
     def _is_daily_quota_error(exc: Exception) -> bool:
         """Проверяет, что ошибка связана с суточной квотой Gemini."""
         upper = str(exc).upper()
@@ -384,6 +503,8 @@ class AIClient:
             return self._is_daily_quota_error(exc)
         if provider == "groq":
             return isinstance(exc, GroqRateLimitError)
+        if provider == "anthropic":
+            return isinstance(exc, AnthropicRateLimitError)
         return False
 
     def _build_provider_error(
@@ -397,6 +518,8 @@ class AIClient:
             return err
         if provider == "groq":
             return self._build_groq_error(exc)
+        if provider == "anthropic":
+            return self._build_anthropic_error(exc)
         return AIClientResponseError(str(exc))
 
     @retry_on_api
@@ -448,6 +571,30 @@ class AIClient:
             raise AIClientResponseError("Groq вернул пустой ответ.")
         return raw
 
+    @_retry_anthropic
+    async def _request_json_anthropic(
+        self, prompt: str, model_name: str, schema: type
+    ) -> str:
+        """Запрашивает JSON-ответ у Anthropic через messages API."""
+        if not self.anthropic_client:
+            raise AIClientConfigError("Anthropic не инициализирован.")
+
+        hint = _ANTHROPIC_SCHEMA_HINTS.get(schema.__name__, "")
+        user_content = f"{prompt}\n\n{hint}" if hint else prompt
+
+        response = await self.anthropic_client.messages.create(
+            model=model_name,
+            max_tokens=1024,
+            system=_ANTHROPIC_SYSTEM_MSG,
+            messages=[{"role": "user", "content": user_content}],
+            temperature=self.temperature,
+        )
+
+        raw = (response.content[0].text or "").strip()
+        if not raw:
+            raise AIClientResponseError("Anthropic вернул пустой ответ.")
+        return raw
+
     async def _request_json(
         self,
         prompt: str,
@@ -458,6 +605,8 @@ class AIClient:
         """Маршрутизирует JSON-запрос к выбранному провайдеру."""
         if provider == "groq":
             return await self._request_json_groq(prompt, model_name, schema)
+        if provider == "anthropic":
+            return await self._request_json_anthropic(prompt, model_name, schema)
         return await self._request_json_gemini(prompt, model_name, schema)
 
     async def _solve_loop(

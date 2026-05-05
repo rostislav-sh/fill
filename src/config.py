@@ -25,6 +25,10 @@ class Settings(BaseSettings):
 
     groq_api_key: str = Field(default="", validation_alias="GROQ_API_KEY")
     groq_model: str = Field(default="llama-3.3-70b-versatile", validation_alias="GROQ_MODEL")
+
+    anthropic_api_key: str = Field(default="", validation_alias="ANTHROPIC_API_KEY")
+    anthropic_model: str = Field(default="claude-sonnet-4-6", validation_alias="ANTHROPIC_MODEL")
+
     ai_provider: str = Field(default="gemini", validation_alias="AI_PROVIDER")
 
     next_step_text: str = Field(default="Следующий шаг,Далее,Next step,Continue", validation_alias="NEXT_STEP_TEXTS")
@@ -36,8 +40,8 @@ class Settings(BaseSettings):
         provider = self.ai_provider.strip().lower()
         self.ai_provider = provider
 
-        if provider not in {"gemini", "groq", "auto"}:
-            raise ValueError("AI_PROVIDER должен быть одним из: gemini, groq, auto.")
+        if provider not in {"gemini", "groq", "anthropic", "auto"}:
+            raise ValueError("AI_PROVIDER должен быть одним из: gemini, groq, anthropic, auto.")
 
         if provider == "gemini" and not self.gemini_api_key.strip():
             raise ValueError("Для AI_PROVIDER=gemini требуется GEMINI_API_KEY.")
@@ -45,11 +49,17 @@ class Settings(BaseSettings):
         if provider == "groq" and not self.groq_api_key.strip():
             raise ValueError("Для AI_PROVIDER=groq требуется GROQ_API_KEY.")
 
+        if provider == "anthropic" and not self.anthropic_api_key.strip():
+            raise ValueError("Для AI_PROVIDER=anthropic требуется ANTHROPIC_API_KEY.")
+
         if provider == "auto" and not (
-            self.gemini_api_key.strip() or self.groq_api_key.strip()
+            self.gemini_api_key.strip()
+            or self.groq_api_key.strip()
+            or self.anthropic_api_key.strip()
         ):
             raise ValueError(
-                "Для AI_PROVIDER=auto требуется хотя бы один ключ: GEMINI_API_KEY или GROQ_API_KEY."
+                "Для AI_PROVIDER=auto требуется хотя бы один ключ: "
+                "GEMINI_API_KEY, GROQ_API_KEY или ANTHROPIC_API_KEY."
             )
 
         return self

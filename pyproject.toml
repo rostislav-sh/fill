@@ -1,13 +1,15 @@
 [project]
 name = "fill"
 version = "0.1.0"
-description = "Add your description here"
+description = "Add your description here" # bro, add description here plz
 requires-python = ">=3.10"
 dependencies = [
     "aiohttp>=3.13.3",
+    "anthropic>=0.40.0",
     "google-genai>=1.67.0",
     "groq>=1.1.1",
     "pydantic>=2.12.5",
     "pydantic-settings>=2.13.1",
     "tenacity>=9.1.4",
+    "asyncpg>=0.29.0",
 ]

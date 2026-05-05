@@ -6,6 +6,7 @@ import asyncio
 from pydantic import BaseModel, ConfigDict
 
 from src.ai_client import AIClient
+from src.db.knowledge_cache import KnowledgeCache
 from src.config import settings
 from src.exceptions import (
     AIClientResponseError,
@@ -45,6 +46,7 @@ class StepProcessor:
         registry: SolverRegistry,
         max_attempts: int | None = None,
         delay: float | None = None,
+        cache: KnowledgeCache | None = None,
     ) -> None:
         """Инициализирует зависимости и параметры retry на уровне шага."""
         self.ai = ai
@@ -52,6 +54,7 @@ class StepProcessor:
         self.registry = registry
         self.max_attempts = max_attempts or max(1, settings.step_solve_attempts)
         self.delay = delay or settings.api_delay_between_steps_sec
+        self.cache = cache
 
         self.checker = StepChecker(api)
 
@@ -90,17 +93,24 @@ class StepProcessor:
 
     async def _attempt_loop(self, step_id, step, solver):
         """Повторяет попытки решения шага до лимита или успеха."""
+        cached_reply: dict | None = None
+        if self.cache:
+            cached_reply = await self.cache.get_reply(step_id, step.question_text)
+
+        previous_reply: dict | None = None
         for num in range(1, self.max_attempts + 1):
             try:
                 attempt = await self.api.create_attempt(step_id)
-                logger.info(
-                    "Попытка %d/%d (id=%d)",
-                    num, self.max_attempts, attempt.attempt_id,
-                )
 
-                reply = await solver.solve(
-                    self.api, self.ai, step, attempt,
-                )
+                if cached_reply is not None:
+                    reply = cached_reply
+                    logger.info("[CACHE] Шаг %d попытка %d/%d (id=%d)", step_id, num, self.max_attempts, attempt.attempt_id)
+                else:
+                    reply = await solver.solve(
+                        self.api, self.ai, step, attempt, previous_reply,
+                    )
+                    logger.info("[AI] Шаг %d попытка %d/%d (id=%d)", step_id, num, self.max_attempts, attempt.attempt_id)
+
                 logger.debug("Reply: %s", reply)
 
                 sub_id = await self.api.submit_answer(
@@ -110,13 +120,18 @@ class StepProcessor:
 
                 if status == "correct":
                     logger.info("✅ Шаг %d решён!", step_id)
+                    if self.cache and cached_reply is None:
+                        await self.cache.save_reply(
+                            step_id, step.block_type, step.question_text, reply
+                        )
                     return ProcessStepResult(success=True)
 
                 if status == "wrong":
-                    logger.warning(
-                        "❌ Неверно (%d/%d).",
-                        num, self.max_attempts,
-                    )
+                    logger.warning("❌ Шаг %d неверно (%d/%d).", step_id, num, self.max_attempts)
+                    previous_reply = reply
+                    if cached_reply is not None:
+                        await self.cache.delete_reply(step_id)
+                        cached_reply = None
                     if num < self.max_attempts:
                         await asyncio.sleep(self.delay)
                         continue
@@ -126,6 +141,7 @@ class StepProcessor:
                 return ProcessStepResult(success=True)
 
             except _EXPECTED_ERRORS as exc:
+                cached_reply = None
                 logger.error("Попытка %d: %s", num, exc)
                 if num < self.max_attempts:
                     continue
