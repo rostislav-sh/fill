@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     anthropic_api_key: str = Field(default="", validation_alias="ANTHROPIC_API_KEY")
     anthropic_model: str = Field(default="claude-sonnet-4-6", validation_alias="ANTHROPIC_MODEL")
 
+    database_url: str = Field(default="", validation_alias="DATABASE_URL")
+
     ai_provider: str = Field(default="gemini", validation_alias="AI_PROVIDER")
 
     next_step_text: str = Field(default="Следующий шаг,Далее,Next step,Continue", validation_alias="NEXT_STEP_TEXTS")

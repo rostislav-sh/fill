@@ -1,4 +1,5 @@
 import logging
+import re
 from textwrap import dedent
 
 from google import genai
@@ -591,6 +592,9 @@ class AIClient:
         )
 
         raw = (response.content[0].text or "").strip()
+        if raw.startswith("```"):
+            raw = re.sub(r"^```(?:json)?\s*\n?", "", raw)
+            raw = re.sub(r"\n?```\s*$", "", raw).strip()
         if not raw:
             raise AIClientResponseError("Anthropic вернул пустой ответ.")
         return raw

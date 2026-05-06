@@ -19,7 +19,7 @@ services:
       GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-6}
-      DATABASE_URL: ${DATABASE_URL:-postgresql://stepik:stepik@postgres:5432/stepik_cache}
+      DATABASE_URL: postgresql://stepik:stepik@postgres:5432/stepik_cache
 
       STEP_SOLVE_ATTEMPTS: ${STEP_SOLVE_ATTEMPTS:-5}
       API_RETRY_ATTEMPTS: ${API_RETRY_ATTEMPTS:-2}
@@ -30,15 +30,17 @@ services:
           cpus: "1.0"
 
   postgres:
-    image: postgres:16-alpine
+    image: postgres:17-alpine
+    ports:
+      - "5432:5432"
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-stepik}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-stepik}
-      POSTGRES_DB: ${POSTGRES_DB:-stepik_cache}
+      POSTGRES_USER: stepik
+      POSTGRES_PASSWORD: stepik
+      POSTGRES_DB: stepik_cache
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-stepik} -d ${POSTGRES_DB:-stepik_cache}"]
+      test: ["CMD-SHELL", "pg_isready -U stepik -d stepik_cache"]
       interval: 5s
       timeout: 5s
       retries: 5

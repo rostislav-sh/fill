@@ -97,7 +97,7 @@ class StepProcessor:
         if self.cache:
             cached_reply = await self.cache.get_reply(step_id, step.question_text)
 
-        previous_reply: dict | None = None
+        previous_replies: list[dict] = []
         for num in range(1, self.max_attempts + 1):
             try:
                 attempt = await self.api.create_attempt(step_id)
@@ -107,7 +107,7 @@ class StepProcessor:
                     logger.info("[CACHE] Шаг %d попытка %d/%d (id=%d)", step_id, num, self.max_attempts, attempt.attempt_id)
                 else:
                     reply = await solver.solve(
-                        self.api, self.ai, step, attempt, previous_reply,
+                        self.api, self.ai, step, attempt, previous_replies or None,
                     )
                     logger.info("[AI] Шаг %d попытка %d/%d (id=%d)", step_id, num, self.max_attempts, attempt.attempt_id)
 
@@ -128,7 +128,7 @@ class StepProcessor:
 
                 if status == "wrong":
                     logger.warning("❌ Шаг %d неверно (%d/%d).", step_id, num, self.max_attempts)
-                    previous_reply = reply
+                    previous_replies.append(reply)
                     if cached_reply is not None:
                         await self.cache.delete_reply(step_id)
                         cached_reply = None

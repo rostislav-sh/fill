@@ -26,7 +26,7 @@ class MatchingSolver(BaseSolver):
         ai: AIClient,
         step: StepData,
         attempt: AttemptData,
-        previous_reply: dict | None = None,
+        previous_replies: list[dict] | None = None,
     ) -> dict:
         """Решает matching программно или через AI и возвращает ordering-reply."""
         logger.info(
@@ -49,8 +49,8 @@ class MatchingSolver(BaseSolver):
             )
 
         question = step.question_text
-        if previous_reply is not None:
-            prev_ordering = previous_reply.get("ordering", [])
+        if previous_replies:
+            prev_ordering = previous_replies[-1].get("ordering", [])
             question += (
                 f"\n\nПредыдущий порядок {prev_ordering} был НЕВЕРНЫМ. "
                 f"Попробуй другое сопоставление."

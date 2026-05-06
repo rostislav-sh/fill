@@ -26,7 +26,7 @@ class SortingSolver(BaseSolver):
         ai: AIClient,
         step: StepData,
         attempt: AttemptData,
-        previous_reply: dict | None = None,
+        previous_replies: list[dict] | None = None,
     ) -> dict:
         """Решает sorting программно или через AI и формирует ordering-reply."""
         ordering = try_solve_sorting(step, attempt)
@@ -38,7 +38,8 @@ class SortingSolver(BaseSolver):
             raise DOMElementNotFoundError("Пустые данные sorting.")
 
         question = step.question_text
-        if previous_reply is not None:
+        if previous_replies:
+            previous_reply = previous_replies[-1]
             question += (
                 f"\n\nПредыдущий порядок {previous_reply.get('ordering', [])} "
                 f"был НЕВЕРНЫМ. Попробуй другой."

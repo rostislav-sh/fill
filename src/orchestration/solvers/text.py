@@ -26,13 +26,13 @@ class TextSolver(BaseSolver):
         ai: AIClient,
         step: StepData,
         attempt: AttemptData,
-        previous_reply: dict | None = None,
+        previous_replies: list[dict] | None = None,
     ) -> dict:
         """Решает text/number задачу и возвращает reply в нужном формате."""
         question = step.question_text
 
-        if previous_reply is not None:
-            prev_answer = previous_reply.get("text") or previous_reply.get("number", "")
+        if previous_replies:
+            prev_answer = previous_replies[-1].get("text") or previous_replies[-1].get("number", "")
             question += (
                 f"\n\nПредыдущий ответ «{prev_answer}» был НЕВЕРНЫМ. "
                 f"Дай другой ответ."

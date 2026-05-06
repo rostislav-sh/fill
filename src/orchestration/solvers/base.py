@@ -16,7 +16,7 @@ class BaseSolver(ABC):
         ai: AIClient,
         step: StepData,
         attempt: AttemptData,
-        previous_reply: dict | None = None,
+        previous_replies: list[dict] | None = None,
     ) -> dict:
         """Возвращает `reply`-словарь для отправки в Stepik API."""
         ...
